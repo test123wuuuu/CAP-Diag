@@ -7,8 +7,6 @@ Anonymous submission to EMNLP 2026.
 
 This repository contains the code and paper for **CAP-Diag**, a diagnostic framework that measures detector-statistic-accessible mutual information in LLM watermarks under controlled rewrite transformations.
 
-**Paper**: `paper/main.pdf`
-
 ## Abstract
 
 Watermark detectors are evaluated by AUROC/TPR/robustness benchmarks, but those metrics do not say how much information the chosen detection statistic $S$ still carries about the watermark flag $W$ once the text has been meaning-preservingly rewritten. We propose **CAP-Diag**, a diagnostic that estimates the *detector-statistic-accessible* MI $\hat{I}(W;S)$ under a controlled rewrite ladder (R0/R1/R1.5/R2), with a Fano-style chosen-statistic error floor for any classifier consuming $S$.
@@ -19,11 +17,6 @@ On 200 synthetic and 300 Wikipedia sources across three token-level watermark fa
 
 ```
 anonymous-emnlp2026/
-├── paper/                      # LaTeX source and PDF
-│   ├── main.tex               # Main paper
-│   ├── main.pdf               # Compiled PDF
-│   ├── tables/                # Table definitions
-│   └── references/            # Bibliography
 ├── code/                       # Experimental code
 │   ├── protocols.py           # Core rewrite regime definitions
 │   └── experiments/           # Experiment scripts
@@ -33,7 +26,6 @@ anonymous-emnlp2026/
 │       └── length_control/    # Length disentanglement
 ├── data/                       # Data samples
 │   └── sample_inputs/         # Sample input data
-└── docs/                       # Additional documentation
 ```
 
 ## Key Contributions
@@ -84,9 +76,6 @@ python code/experiments/capacity/e3_generate_exp.py --help
 
 This code is released for research purposes. See LICENSE for details.
 
-## Contact
 
-For questions about this work, please contact the authors through the anonymous submission system.
-=======
-# CAP-Diag
->>>>>>> b2d96a6da854202639e9d947a7602e00cd218fab
+
+>>>>>>> 
