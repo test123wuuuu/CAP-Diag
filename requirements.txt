@@ -1,0 +1,34 @@
+# Python Dependencies for CAP-Diag
+
+# Core ML/DL
+torch>=2.0.0
+transformers>=4.30.0
+accelerate>=0.20.0
+
+# NLP utilities
+sentencepiece>=0.1.99
+tokenizers>=0.13.0
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Statistics and MI estimation
+scipy>=1.10.0
+scikit-learn>=1.3.0
+
+# Visualization (optional, for plotting)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities
+tqdm>=4.65.0
+jsonlines>=3.1.0
+
+# Optional: for faster inference
+bitsandbytes>=0.41.0  # 8-bit quantization
+flash-attn>=2.0.0     # Flash attention (if available)
+
+# Development (optional)
+pytest>=7.4.0
+black>=23.0.0
