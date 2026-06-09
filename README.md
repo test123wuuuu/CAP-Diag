@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # CAP-Diag: Diagnosing Detector-Statistic-Accessible Information in LLM Watermarks under Controlled Rewrite
 
 Anonymous submission to EMNLP 2026.
@@ -86,3 +87,6 @@ This code is released for research purposes. See LICENSE for details.
 ## Contact
 
 For questions about this work, please contact the authors through the anonymous submission system.
+=======
+# CAP-Diag
+>>>>>>> b2d96a6da854202639e9d947a7602e00cd218fab
