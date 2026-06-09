@@ -1,0 +1,1214 @@
+\documentclass[11pt]{article}
+\usepackage[review]{acl}
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{url}
+
+\newtheorem{proposition}{Proposition}
+
+\title{CAP-Diag: Diagnosing Detector-Statistic-Accessible Information
+in LLM Watermarks under Controlled Rewrite}
+
+\author{Anonymous Submission \\
+  ACL 2027 (anonymized) \\
+  \texttt{anonymous@example.org}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Watermark detectors are evaluated by AUROC / TPR / robustness benchmarks, but
+those metrics do not say how much information the chosen detection statistic
+$S$ still carries about the watermark flag $W$ once the text has been
+meaning-preservingly rewritten. We propose \textbf{CAP-Diag}, a diagnostic
+that estimates the \emph{detector-statistic-accessible} MI $\hat I(W;S)$
+under a controlled rewrite ladder (R0/R1/R1.5/R2), with a Fano-style
+chosen-statistic error floor for any classifier consuming $S$
+(Prop.~\ref{prop:bayes}). On $200$ synthetic and $300$ Wikipedia sources
+across three token-level watermark families (KGW, UW, EXP/Gumbel),
+CAP-Diag exposes a \emph{regime/length-coupled low-information bottleneck}:
+source-paired R1/R0 MI ratio $\approx 4$--$15\times$ across families and
+corpora, KGW/UW Wilcoxon $p<10^{-34}$. A controlled length-matched re-analysis (R1-short generation at target
+$30$--$50$ tok, mean $\approx 34$ tok matching R0) shows that, at matched
+length, source-paired R1-short / R0 ratio is $1.57\times$ [$1.21, 2.30$]
+for KGW ($n_{\mathrm{pairs}}=148$) and $2.71\times$ [$1.74, 4.52$] for UW
+($n_{\mathrm{pairs}}=111$); both CIs exclude $1$. Length is the dominant
+driver but a regime-specific residual component is supported with
+adequate power across both families. The bottleneck drives a \emph{Low-Capacity Rewrite Attack}
+that re-rewrites watermarked R2 text into the diagnosed R0 regime
+($\approx 80\%$ MI drop), and \textbf{CAP-Triage} converts the diagnosis
+into an abstention readout with held-out source and held-out
+Wikipedia-domain validation. Mechanism boundaries are bounded references:
+a SemStamp-style k-LSH reference also exhibits R0$<$R1, while a
+POSTMARK-style content-insertion sanity check does not (R1/R0
+$\approx 1.0$). We complement the long-text reliability lens
+of~\citet{kirchenbauer2024reliability}: long spans are reliably detectable;
+CAP-Diag characterises the short, compressed, fact-skeleton regime in
+which $S$ no longer carries enough information. CAP-Diag is
+statistic-conditional, not Shannon capacity; not a benchmark, not a new
+watermark, not a defense.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+LLM watermarks~\citep{kirchenbauer2023watermark,zhao2024provable,kuditipudi2024robust}
+underpin provenance pipelines that must remain readable after the watermarked
+text is rewritten, summarised, or otherwise transformed by downstream users.
+Standard evaluation reports detection metrics (AUROC, TPR at fixed FPR) and
+attack-robustness benchmarks~\citep{piet2024markmywords,tu2024waterbench,liang2024waterpark};
+recent reliability work~\citep{kirchenbauer2024reliability} shows that
+sufficiently long observed watermarked spans remain reliably detectable
+even under substantial paraphrase or human edits. \emph{What these metrics
+do not answer is how much information the chosen detector statistic $S$
+itself still carries about the watermark flag $W$ once the text has been
+rewritten under a controlled meaning-preserving transformation.} A detector
+that scores AUROC$=0.99$ on long high-strength text may still face a regime
+in which $S$ has near-zero information about $W$ --- and AUROC alone does
+not say which regime that is, or what to do at deployment when it is.
+
+\paragraph{Diagnostic object.}
+We define and operationalise the chosen-statistic-conditional mutual
+information $\hat I(W;S)$ under a controlled rewrite ladder: regimes R0
+(short fact-skeleton), R1 (short paraphrase), R1.5 (looser surface), R2
+(long elaboration), each gated by NLI bidirectional non-contradiction,
+fact-skeleton match, and length band. Prop.~\ref{prop:bayes} converts
+small $\hat I(W;S)$ into a Fano-style lower bound on the error rate of
+\emph{any} classifier that consumes $S$, including the Bayes-optimal one.
+This is statistic-conditional --- not Shannon capacity, not an
+all-detector upper bound.
+
+\paragraph{Diagnostic protocol.}
+\textbf{CAP-Diag} packages the measurement as a reusable
+input/output contract (Sec.~\ref{sec:capdiag}, Table~\ref{tab:contract}):
+inputs are a source set, regime ladder, utility gate, watermark family,
+detector statistic $S$, and prior $\pi$; the procedure runs a clipped
+Miller--Madow estimator on a balanced sample with source-paired bootstrap,
+AUROC/TPR alongside, length and permutation nulls, and a risk-coverage
+readout; the output is an accessible-MI ladder, a Fano floor, AUROC/TPR
+comparison, confound diagnostics, the Low-Capacity Rewrite Attack
+consequence, and a CAP-Triage abstention recommendation.
+
+\paragraph{Main finding: regime/length-coupled low-information bottleneck.}
+Across three token-level families (KGW/UW/EXP) on synthetic and
+naturalistic English, fact-skeleton R0 rewrites carry markedly less
+detector-accessible information than R1 paraphrases (source-paired R1/R0
+MI ratio $\approx 4$--$15\times$, KGW/UW Wilcoxon $p<10^{-34}$). Length is
+\emph{not} a caveat: a length-only baseline classifies R0 vs R1 at
+AUROC$=0.996$, and we adopt the length-as-sample-complexity lens
+of~\citet{kirchenbauer2024reliability} to position the finding as
+\emph{regime/length-coupled} rather than length-orthogonal. A controlled
+length-matched re-analysis (Sec.~\ref{sec:length_disent}; R1-short prompt
+at target $30$--$50$ tokens, mean $\approx 34$ matching R0) shows that
+when length is matched, source-paired R1-short / R0 MI ratio is
+$1.57\times$ [$1.21, 2.30$] for KGW ($n_{\mathrm{pairs}}=148$) and
+$2.71\times$ [$1.74, 4.52$] for UW ($n_{\mathrm{pairs}}=111$); both CIs
+exclude $1$ with adequate power across both families. The bottleneck is
+therefore length-coupled \emph{but not length-explained}: a residual
+regime-specific component remains under controlled length matching.
+
+\paragraph{Consequence and readout.}
+Because R0 is a diagnosed low-information regime, an attacker can
+re-rewrite watermarked R2 text into R0-style fact skeleton without changing
+key facts; the resulting MI drop is $81\%$ (KGW) / $77\%$ (UW) with
+bootstrap CIs (\textbf{Low-Capacity Rewrite Attack}, Sec.~\ref{sec:lowcap_attack}).
+\textbf{CAP-Triage} (Sec.~\ref{sec:cap_triage}) converts the same
+low-information diagnosis into an abstention readout that reduces
+false-confident emissions on R0-dominated documents using only an
+observable length proxy, with held-out source and held-out Wikipedia-domain
+validation. CAP-Triage is a deployment readout, not a defense: it does not
+recover lost information, it tells the deployer when not to emit.
+
+\paragraph{Mechanism boundaries.}
+A SemStamp-style k-LSH sentence-rejection reference implementation also
+exhibits the R0$<$R1 pattern (Sec.~\ref{sec:semstamp_neg}); a POSTMARK-style
+content-insertion sanity check (with simulated rewrite-survival, not a
+faithful reproduction of POSTMARK) does \emph{not} (R1/R0 ratio
+$\approx 1.0$, Sec.~\ref{sec:postmark}). We read these as bounded
+\emph{reference contrasts} rather than category-level evidence: they
+suggest the bottleneck is tied to token-distribution-deviation statistics
+and is not universal across watermark mechanism classes, but they are not a
+mechanism-class theorem.
+
+\paragraph{Contributions.}
+\begin{enumerate}\itemsep0pt
+\item \textbf{Diagnostic object and protocol.} Detector-statistic-accessible
+MI $\hat I(W;S)$ with a Fano-style chosen-statistic error floor
+(Prop.~\ref{prop:bayes}), packaged as the CAP-Diag protocol with an explicit
+input/output contract (Table~\ref{tab:contract}).
+\item \textbf{Regime/length-coupled low-information bottleneck.} Source-paired
+R1/R0 MI ratio $\approx 4$--$15\times$ across three token-level families on
+two corpora; length is part of the finding, with a length-band-matched
+re-analysis confirming a residual regime-specific component
+(Sec.~\ref{sec:confound}--\ref{sec:length_disent}).
+\item \textbf{Low-Capacity Rewrite Attack as diagnostic consequence.} A
+meaning-preserving R0-style re-rewrite of watermarked R2 text drops MI by
+$\approx 80\%$ (KGW $81.4\%$, UW $77.1\%$ with bootstrap CIs).
+\item \textbf{CAP-Triage abstention readout.} Risk-coverage / abstention
+diagnostic with held-out source and held-out Wikipedia-domain
+validation; not a defense.
+\end{enumerate}
+
+Supporting validation (mechanism-boundary references SemStamp-style and
+POSTMARK-style; LLM-judge gate validation; MI bin-count, classifier-LB,
+gate-NLI, secret-key, skeleton-policy and adaptive-detector sensitivities;
+permutation nulls; per-domain analysis; three honest negative findings) is
+reported in Sec.~\ref{sec:results} and the appendices, but is not part of
+the main contribution list above.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.97\textwidth]{../figures/fig1_capdiag.pdf}
+    \caption{CAP-Diag protocol. Source passages are rewritten under each
+    regime $R$ via a watermarked generator $\mathcal{W}_f(\theta)$. The
+    utility-preserving gate $\mathcal{G}$ enforces NLI bidirectional
+    non-contradiction, fact-skeleton match, and length band. Surviving
+    drafts feed a Miller--Madow MI estimator with source-paired bootstrap.
+    Length-matched and permutation nulls test whether observed regime
+    differences reflect more than length or regime label. An abstention rule
+    converts accessible-information estimates into deployment behaviour.}
+    \label{fig:capdiag}
+\end{figure*}
+
+\section{Background and Setup}
+\label{sec:background}
+
+\subsection{Watermark Families}
+\textbf{KGW}~\citep{kirchenbauer2023watermark} hashes the previous token
+with the secret to derive a per-step green list of $\gamma V$ tokens and
+adds logit bias $\delta$ on green tokens.
+\textbf{Unigram-Watermark (UW)}~\citep{zhao2024provable} uses a single
+fixed green list seeded by the secret. Both share the $z$-score detector
+$z=(n_{\mathrm{green}}-\gamma T)/\sqrt{T\gamma(1-\gamma)}$.
+\textbf{EXP/Gumbel}~\citep{aaronson2023watermark,kuditipudi2024robust}
+replaces sampling with $x_t = \arg\max_v \log r_v / p_v$ where $r_v$ is
+hash-derived from context plus secret; the detector aggregates
+$S_T = \sum_t -\log(1-r_{x_t})$. We also evaluate a
+\textbf{SemStamp-style k-LSH} sentence-rejection
+\emph{reference implementation}~\citep{hou2024semstamp} as a non-token-level
+reference (not the official SemStamp pipeline, not a category-level
+representative); the detector reports the fraction of generated sentences whose SBERT
+embedding falls in a secret-keyed green bucket. We use $\gamma=0.25$ for
+greenlist methods throughout.
+
+\subsection{Rewrite Regimes}
+We study four utility-preserving rewrite regimes:
+\textbf{R0} fact-skeleton rephrase ($\sim$32 synth tok / $\sim$60 nat tok);
+\textbf{R1} short NLI-preserved paraphrase ($\sim$50 / $\sim$86 tok);
+\textbf{R1.5} looser-form NLI-preserved paraphrase ($\sim$46 tok);
+\textbf{R2} longer NLI-preserved rewrite ($\sim$103 / $\sim$160 tok).
+Prompts in Appendix~\ref{app:prompts}. Examples in Appendix~\ref{app:examples}.
+
+\subsection{Detector-Statistic-Accessible MI}
+Treat $W\in\{0,1\}$ as ``is this draft watermarked?'' and $S$ as the
+detector statistic. With pooled samples $z^{(\mathrm{wm})}\!\cup\!
+z^{(\mathrm{no})}$ and $\pi_{\mathrm{wm}}$ the watermarked fraction, we
+estimate
+\begin{align*}
+\hat{I}(W;S) =\; & \hat H_{\mathrm{MM}}(\mathrm{pooled}) \\
+              & - \pi_{\mathrm{wm}} \hat H_{\mathrm{MM}}(z^{(\mathrm{wm})}) \\
+              & - (1{-}\pi_{\mathrm{wm}}) \hat H_{\mathrm{MM}}(z^{(\mathrm{no})}),
+\end{align*}
+where $\hat H_{\mathrm{MM}}$ is the Miller--Madow-corrected histogram
+entropy on $20$ equal-width bins over the pooled range. We clip each
+bootstrap replicate to $[0,1]$ before percentile computation, so CIs lie in
+$[0,1]$ by construction. Throughout we refer to $\hat I(W;S)$ as
+\emph{detector-statistic-accessible MI}; we use ``capacity'' only as
+shorthand after the formal statement below.
+
+\begin{proposition}[Detection-error lower bound under $I(W;S)$]
+\label{prop:bayes}
+Let $W\in\{0,1\}$ with prior $\pi$ and let $S$ be any (possibly randomized)
+function of the observed text. For \emph{any} (possibly randomized)
+classifier $\hat W = h(S)$ that consumes exactly $S$, denote its error
+$P_e = \Pr[\hat W \ne W]$. Fano's inequality gives
+\[
+H(W \mid S) \le H_b(P_e) + P_e \cdot \log_2(|\mathcal{W}|-1),
+\]
+which for binary $W$ reduces to $H(W) - I(W;S) \le H_b(P_e)$, hence
+\[
+P_e \ge H_b^{-1}\!\bigl(H(W) - I(W;S)\bigr),
+\]
+where $H_b^{-1}$ denotes the branch on $[0,1/2]$ (and the bound is
+trivial if $P_e > 1/2$). The bound holds in particular for the
+Bayes-optimal classifier $\hat W^\star$, whose error rate $P_e^\star$ is
+the minimum over all $h$. When $I(W;S) \to 0$, $H(W\mid S)\to H(W)$ so
+the lower bound forces $P_e \ge H_b^{-1}(H(W))$ for \emph{every} $h$, and
+the Bayes-optimal classifier saturates the prior-only baseline
+$P_e^\star \to \min(\pi, 1-\pi)$. Sub-optimal classifiers may of course
+have $P_e$ strictly larger than the prior baseline.
+\end{proposition}
+
+Prop.~\ref{prop:bayes} formalizes what CAP-Diag measures: detection error
+floor for \emph{any} classifier that consumes the chosen $S$. We do
+\emph{not} claim that richer statistics $S'\supsetneq S$ obey the same
+floor; testing stronger statistics is the purpose of our adaptive-detector
+sensitivity (Sec.~\ref{sec:robust}).
+
+\paragraph{Prior $\pi$ and prior-shift interpretation.}
+Throughout this paper we use the empirical balanced prior $\pi{=}0.5$
+(equal wm and no-wm samples per cell). The MI quantity $I(W;S)$ depends on
+the joint distribution and hence on the prior; in deployment under prior
+shift to $\pi'$, one would re-weight to obtain $I_{\pi'}(W;S)$ for use in
+the Fano floor below, or interpret our reported $I_{0.5}(W;S)$ as the MI
+under a balanced detection scenario. Under deployment prior $\pi'{=}0.1$,
+$H(W)\!=\!H_b(0.1)\!\approx\!0.469$ bit, which loosens the bound
+$P_e \ge H_b^{-1}(H(W)-I(W;S))$ proportionally; the qualitative direction
+is unchanged: low $\hat I(W;S)$ forces the Bayes-optimal error toward the
+prior-baseline $\min(\pi',1{-}\pi')$, which for $\pi'{=}0.1$ is $0.1$.
+
+\paragraph{Classifier lower bound details.}
+The classifier lower bound on $I(W;S)$ used in Table~\ref{tab:mi_robust} is
+a cross-entropy lower bound on the balanced sample ($n_{\text{wm}}{=}n_{\text{no}}$,
+$\pi{=}0.5$): train a logistic classifier $\hat p_\theta(W{=}1\mid S)$ via
+$5$-fold stratified CV; compute
+$\hat I_{\text{LB}} = 1 - \mathrm{NLL}_{\text{CV}}(\hat p_\theta)$
+where NLL is the cross-entropy in bits. This is a strict lower bound on
+$I(W;S)$ for the given feature vector under the balanced prior. The base
+feature is the per-text $z$-score $z$; the $S'$ variant adds
+$n_{\text{tokens}}$, green count, and green rate.
+
+\paragraph{Defining $\text{ppl\_ratio}$.} The PPL ratio used in
+Sec.~\ref{sec:c2} is the median per-source ratio of the watermarked
+generator's perplexity on a rewrite, divided by the same generator's
+perplexity on the original source, both computed by Qwen2.5-7B-Instruct.
+
+\paragraph{Utility-Preserving Gate.}
+\label{sec:gate}
+Each rewrite must pass: (i) NLI bidirectional non-contradiction
+(cross-encoder DeBERTa-v3) with $P(\text{contradiction})<0.5$ in both
+directions; (ii) fact-skeleton match: required fact keys appear verbatim
+modulo date/time variants; (iii) length within the regime's band.
+Gate sensitivity (NLI threshold $\{0.3, 0.5, 0.7\}$ + skeleton policy
+$\{$strict, relaxed, soft$\}$) is reported in Sec.~\ref{sec:robust}.
+
+\paragraph{Source-paired Bootstrap.}
+$B=500$ source-paired replicates (seed $20260513$) resampled by
+\emph{(item\_id, agent\_seed)} are used for the canonical
+Tables~\ref{tab:main_results}, \ref{tab:mi_vs_det}, \ref{tab:mi_robust}
+and~\ref{tab:gate_sens}; a small number of earlier-round MI-estimator
+sensitivity cells in App.~\ref{app:mi_sens} used $B=1000$.
+Permutation $p$ uses the exact convention $p=(b+1)/(B+1)$.
+
+\section{The CAP-Diag Protocol}
+\label{sec:capdiag}
+
+CAP-Diag is a reusable diagnostic protocol, not a metric and not a
+benchmark. Table~\ref{tab:contract} states its input/output contract.
+
+\begin{table}[t]
+\centering
+\small
+\caption{CAP-Diag input/output contract.}
+\label{tab:contract}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{0.95\columnwidth}}
+\toprule
+\textbf{Input.} (a) Source set $\mathcal{D}=\{x_i\}$; (b) rewrite regime
+ladder $R\in\{\mathrm{R0},\mathrm{R1},\mathrm{R1.5},\mathrm{R2}\}$ defined
+by prompt + length band; (c) utility gate $\mathcal{G}$ (NLI bidirectional
+non-contradiction + fact-skeleton match + length band); (d) watermark family
+$f$ and strength $\theta$ (defining a generator $\mathcal{W}_f(\theta)$);
+(e) chosen detector statistic $S$ (e.g. KGW/UW $z$, EXP/Gumbel
+$\sum -\log(1-r)$); (f) empirical prior $\pi$ over $W\in\{0,1\}$. \\
+\midrule
+\textbf{Procedure.} (1) For each $(i, r, f, \theta)$ sample
+$\mathcal{W}_f(\theta)(\pi_r(x_i))$ until $K$ drafts pass $\mathcal{G}$;
+(2) compute $\hat I(W;S)$ via clipped Miller--Madow on a balanced
+$n_{\mathrm{wm}}{=}n_{\mathrm{no}}$ sample at the stated $\pi$; (3) compute
+AUROC / TPR\,@\,FPR on the same balanced cells; (4) source-paired bootstrap
+$B$ replicates; (5) length-bin and regime-label permutation nulls; (6)
+risk-coverage readout via an observable proxy (length or
+source-relative PPL). \\
+\midrule
+\textbf{Output.} (a) Accessible-information ladder $\hat I_r(W;S)$ with
+$95\%$ CIs; (b) Fano-style chosen-statistic error floor
+$P_e \ge H_b^{-1}(H(W){-}\hat I(W;S))$ for any classifier consuming $S$
+(Prop.~\ref{prop:bayes}); (c) AUROC/TPR comparison; (d) confound
+diagnostics (length, key density, entropy, source-paired Wilcoxon); (e) a
+Low-Capacity Rewrite Attack consequence quantified as MI drop with bootstrap
+CI; (f) a CAP-Triage risk-coverage / abstention recommendation. \\
+\midrule
+\textbf{Scope.} Statistic-conditional and prior-conditional only. Not
+Shannon channel capacity. Not an all-detector upper bound. Not a benchmark.
+Not a new watermark method. Not a defense. CAP-Triage is an abstention
+readout, not a detector.\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The full algorithm is in Appendix~\ref{app:algorithm} and a diagrammatic
+view is in Fig.~\ref{fig:capdiag}.
+
+Three properties distinguish CAP-Diag from prior watermark evaluation
+lines (Sec.~\ref{sec:related}, Table~\ref{tab:related}):
+\textbf{(i) metric}: MarkMyWords~\citep{piet2024markmywords},
+WaterBench~\citep{tu2024waterbench}, and WaterPark~\citep{liang2024waterpark}
+report combinations of AUROC, TPR at fixed FPR, and (for WaterPark) attack
+robustness; CAP-Diag reports $\hat I(W;S)$ together with the standard
+metrics.
+\textbf{(ii) controls}: a pre-registered ladder of rewrite regimes,
+length-matched buckets with regime-specific baselines, permutation tests
+over regime labels.
+\textbf{(iii) output}: an abstention rule that says \emph{when not to
+emit} a detector decision.
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+\textbf{Synthetic corpus.} $200$ fact-skeleton episodes (entity, value,
+date), 2 source variants A/B, 7-strength sweep $\{0,0.5,1,1.5,2,3,5\}$ for
+KGW/UW; EXP/Gumbel at peak.
+\textbf{Naturalistic corpus.} $300$ Wikipedia REST passages across $15$
+content domains; each $\geq\!1$ named entity + $\geq\!1$ date/numeric
+(spaCy NER); R0/R1 cover all $300$, R1.5/R2 cover a $150$-source subset.
+\textbf{Models.} Qwen2.5-7B-Instruct~\citep{qwen2_5_7b} primary;
+Llama-3.1-8B-Instruct~\citep{grattafiori2024llama3} sanity check
+(App.~\ref{app:llama}).
+\textbf{NLI gate.} cross-encoder/nli-deberta-v3-base.
+\textbf{Reproducibility.} Three additional secret keys
+$\{13371337, 99999991, 42424242\}$. Prompts, source IDs, and raw scores
+will be released in the supplementary upon publication.
+
+\section{Results}
+\label{sec:results}
+
+We organise the empirical evidence around six research questions, each
+serving one named claim from the contribution list:
+
+\begin{itemize}\itemsep0pt
+\item \textbf{RQ1} (\S\ref{sec:c1}): does controlled rewrite create an
+accessible-information ladder $\hat I_{\mathrm{R0}} < \hat I_{\mathrm{R1}}
+< \hat I_{\mathrm{R2}}$ across watermark families and corpora?
+\item \textbf{RQ2} (\S\ref{sec:c1}, \emph{MI vs detection metrics}): what
+does $\hat I(W;S)$ diagnose beyond AUROC/TPR?
+\item \textbf{RQ3} (\S\ref{sec:robust}--\S\ref{sec:c2}): what mechanism
+explains the bottleneck, and how is it length/regime-coupled?
+\item \textbf{RQ4} (\S\ref{sec:lowcap_attack}): can the diagnosed
+low-information regime be actively triggered as an attack consequence?
+\item \textbf{RQ5} (\S\ref{sec:cap_triage}): can the diagnostic be
+turned into a deployment-side abstention readout?
+\item \textbf{RQ6} (\S\ref{sec:semstamp_neg}, \S\ref{sec:postmark}): what
+are the mechanism boundaries --- which watermark mechanism classes
+exhibit the bottleneck and which do not?
+\end{itemize}
+
+\subsection{RQ1: Accessible-Information Ladder Across Regimes}
+\label{sec:c1}
+
+\input{table_main_results}
+
+Table~\ref{tab:main_results} gives peak-strength MI per (regime, family,
+corpus). \textbf{Tables 1 and 2 share an identical balanced
+sample/estimator/bootstrap} (clipped Miller--Madow, $20$ bins, $B{=}500$
+source-paired bootstrap, peak $\delta{=}5$ or $\beta{=}1$, empirical prior
+$\pi{=}0.5$). Synthetic uses $n_{\text{wm}}{=}n_{\text{no}}{=}200$
+(variant A; larger no-wm pools downsampled with a fixed seed to maintain
+balance); naturalistic R0/R1 uses $n_{\text{wm}}{=}n_{\text{no}}{=}300$;
+nat R1.5/R2 use a $150$-source subset. R0 $<$ R1 $<$ R2 holds for KGW,
+UW, and EXP/Gumbel on the synthetic corpus; for naturalistic text the
+KGW/UW four-regime ladder holds on the $150$-source subset, while
+EXP/Gumbel naturalistic is reported on R0/R1 only (this round does not
+extend EXP to nat R1.5/R2). The SemStamp-style k-LSH reference also shows
+R0$<$R1 (Sec.~\ref{sec:semstamp_neg}); the POSTMARK-style reference does
+not (Sec.~\ref{sec:postmark}).
+
+\paragraph{R1/R0 ratios.} Source-paired bootstrap-inside-loop on the
+unified sample: synthetic KGW $4.14\times$ [$2.95,4.81$], UW
+$4.80\times$ [$3.27,5.55$], EXP $14.89\times$ [$6.80,18.51$];
+naturalistic KGW $4.14\times$ [$3.23,4.45$], UW $5.32\times$
+[$3.96,5.95$], EXP $11.84\times$ [$6.29,14.71$].
+All $p_{\mathrm{exact}}{=}5{\times}10^{-4}$. Ratios computed on point
+estimates would inflate the gap (Jensen on division near zero).
+
+\paragraph{Naturalistic R1.5/R2.} The full $300$-source naturalistic corpus
+covers R0/R1; for the four-regime ladder we evaluate a $150$-source
+subset of the same corpus on KGW/UW: KGW R0/R1/R1.5/R2$=0.21/0.86/0.86/1.00$;
+UW $=0.14/0.72/0.78/0.95$ (R0/R1 from full $300$-source corpus, R1.5/R2
+from the $150$-source subset; see Table~\ref{tab:main_results}).
+EXP/Gumbel was not extended to nat R1.5/R2 in this round.
+
+\paragraph{R1.5 is a more-selected, looser-paraphrase cell.}
+The utility gate accepts R0 at $0.955$, R1 at $0.762$, R2 at $0.830$, but
+\textbf{R1.5 at $0.297$} (Appendix~\ref{app:gate}). R1.5 results in
+Table~\ref{tab:main_results} and Table~\ref{tab:mi_vs_det} should be
+interpreted as a more selected pool of looser-form paraphrases rather than
+as a regime fully comparable to R0/R1/R2; the looser-form R1.5 prompt
+generates more NLI-rejected drafts, and the surviving R1.5 drafts are
+those that did pass the bidirectional non-contradiction check. This does
+not affect the headline R0$<$R1 contrast (both have high pass rates) but it
+qualifies any reading of the full ladder as a continuous strength sweep.
+
+\paragraph{RQ2 --- MI vs standard detection metrics.}
+\input{table_mi_vs_det}
+Table~\ref{tab:mi_vs_det} reports AUROC and TPR@$1\%/5\%$FPR on identical
+cells. The argument is \emph{two-layered}: \textbf{at R0}, AUROC is also
+low ($0.64$--$0.80$) and TPR@$5\%$FPR $\leq 0.31$; MI's role is to
+convert this failure into a Fano-style information-theoretic floor
+(Prop.~\ref{prop:bayes}). \textbf{At R1+}, KGW/UW AUROC saturates above
+$0.97$ on both corpora and EXP/Gumbel reaches $1.00$ at R2, while MI ranges
+$0.49$--$1.00$, exposing residual accessible-information structure that
+AUROC compresses to its ceiling (Fig.~\ref{fig:strength_sweep}).
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{../figures/fig_strength_sweep.pdf}
+    \caption{Synthetic R0 vs R1 across watermark strength sweep. AUROC
+    saturates near $1.0$ at high strength while R0 MI stays low, and R1
+    MI continues to grow. AUROC's saturation hides the R0 vs R1 accessible-MI
+    gap; MI surfaces it.}
+    \label{fig:strength_sweep}
+\end{figure}
+
+\subsection{Supporting validation: estimator, adaptive detector, gate, and key sensitivity}
+\label{sec:robust}
+
+\input{table_mi_robust}
+
+\paragraph{MI estimator.} Histogram equal-width (default), histogram
+equal-frequency, classifier lower bound on $z$, and classifier lower bound
+on a richer 4-feature $S' = (z, n_\text{tokens}, \text{green count},
+\text{green rate})$ all preserve R0 $\ll$ R1 with disjoint CIs
+(Table~\ref{tab:mi_robust}). The mixed continuous-binary kNN estimator
+saturates and is uninformative (Appendix~\ref{app:mi_sens}).
+
+\paragraph{Adaptive detectors.} Higher Criticism (Donoho--Jin), truncated
+goodness-of-fit (Tr-GoF style)~\citep{li2024trgof}, and Stouffer combined
+$z$ on per-token Bernoulli p-values preserve the R0 $\ll$ R1 gap for
+KGW and UW (max R0 MI $\leq 0.089$). EXP/Gumbel uses a continuous
+exponential per-token statistic, on which HC and Tr-GoF saturate poorly
+($\rho < 1$); Stouffer remains the meaningful aggregator for EXP and
+preserves the $15.5\times$ R1/R0 ratio.
+
+\paragraph{Gate sensitivity.} Re-scoring NLI on the canonical balanced
+sample at thresholds $\{0.3, 0.5, 0.7\}$ (Table~\ref{tab:gate_sens})
+gives source-paired R1/R0 ratio $5.19$--$5.60\times$ (KGW) and
+$7.35$--$7.40\times$ (UW); ordering and CI-disjointness from $1$ are
+stable across thresholds.
+\input{table_gate_sens}
+
+\paragraph{Skeleton-policy ablation.} On three policies
+(\emph{strict} verbatim, \emph{relaxed} year/number format variants,
+\emph{soft} entity-only), R0 vs R1 ratio is invariant (KGW
+$8.34/8.29/7.95\times$; UW $13.65/13.46/13.44\times$; all perm $p<5e{-4}$).
+The gap is \emph{not} gate-induced.
+
+\paragraph{Secret-key sensitivity.} Three additional keys × KGW/UW × $50$
+sources: R0 vs R1 ratio range $3.3$--$17.3\times$ (KGW),
+$5.9$--$12.1\times$ (UW), all CIs disjoint.
+
+\subsection{RQ3: Mechanism --- Length/Regime Coupling as Main Finding}
+\label{sec:c3}\label{sec:confound}
+
+This subsection is not a caveat. The Round-10 message of the paper is
+that \textbf{CAP-Diag's contribution is the formal and empirical
+characterisation of a length/regime-coupled low-information bottleneck
+under three token-level $z$-statistic detectors}, inheriting the
+length-as-sample-complexity lens of~\citet{kirchenbauer2024reliability}.
+
+\paragraph{Length-matched bucket.} R0 has fewer tokens than R1; we
+verify the gap is not a length artefact at the bucket level. In the
+overlapping window $[35,50)$ tokens, R0 KGW MI $0.226$ vs R1 $0.804$
+(ratio $\approx 3.55\times$, $p_{\mathrm{exact}}=5{\times}10^{-4}$); R0 UW
+$0.060$ vs R1 $0.890$ (ratio $\approx 14.93\times$,
+$p_{\mathrm{exact}}=5{\times}10^{-4}$).
+
+\paragraph{Stratified MI.} Within (40--70 tok)$\times$moderate
+key density$\times$moderate unigram entropy --- the only bin with
+$\geq\!10$ candidates in both R0 and R1 --- KGW R0$=0.367$ vs R1$=0.672$
+(ratio $1.83\times$, CIs overlap); UW R0$=0.419$ vs R1$=0.809$ (ratio
+$1.93\times$, CIs just disjoint).
+
+\paragraph{Source-paired Wilcoxon.}
+On $200$ sources, the source-paired Wilcoxon one-sided test (R1 z-gap $>$
+R0 z-gap) gives $p=7.4\times 10^{-35}$ (KGW) and $p=7.2\times 10^{-35}$
+(UW); within the same source, R1 z-gap is $\approx 4.85\times$ (KGW) /
+$\approx 6.70\times$ (UW) the R0 value.
+
+\paragraph{Simple-baseline diagnostic comparison.} CV linear regression of
+per-source $z$-gap on simple text features ($800$ rows): length-only
+$R^2{=}0.640$, key-density $R^2{=}0.410$, unigram-entropy $R^2{=}0.617$,
+length+entropy $R^2{=}0.616$; regime-label-only $R^2{=}0.775$.
+Length-only logistic for (R0 vs R1) classification gives AUROC$=0.996$.
+\textbf{Length explains a substantial share of $z$-gap variance.}
+
+\paragraph{Relation to long-text reliability.}
+The reliability lens of~\citet{kirchenbauer2024reliability} shows that
+KGW remains reliably detectable as the observed watermarked span grows,
+because the detector $z$-statistic accumulates evidence at
+$O(\sqrt{T})$. CAP-Diag complements rather than contradicts this lens:
+in the R0 regime the observed span is short ($\bar{T}\approx 32$) and the
+rewrite additionally collapses per-token green/red statistics toward
+chance, so the chosen statistic $S$ has insufficient accessible
+information for any classifier consuming it (Prop.~\ref{prop:bayes}).
+Length is therefore part of the main finding under the same
+length-as-sample-complexity lens, not a caveat orthogonal to mechanism.
+
+\paragraph{What this means.} The bottleneck is real but \emph{not}
+orthogonal to length. (1) The per-source paired contrast survives with
+$p<10^{-34}$. (2) The strong length proxy is a finding, not a failure: it
+feeds CAP-Triage (Sec.~\ref{sec:cap_triage}). (3) The contribution is the
+quantitative diagnosis, via Prop.~\ref{prop:bayes}, of when token-level
+$z$-statistics carry little information, and the demonstration that this
+happens robustly across three token-level mechanisms. (4) An external
+reference contrast (POSTMARK-style; Sec.~\ref{sec:postmark}) shows R1/R0
+ratio $\approx 1.0$, suggesting the bottleneck is not universal across
+watermark mechanism classes (sanity check, not a full mechanism-class
+theorem).
+
+\subsection{RQ3 (length-controlled R1-short): Disentanglement}
+\label{sec:length_disent}
+
+To probe the hostile reading "the bottleneck is just short-text detection
+difficulty", we run a controlled length-matched generation. We tighten
+the R1 prompt to a target $30$--$50$ tokens (matching R0's natural
+distribution; the R1-short prompt is otherwise identical to R1 in
+preserving every key fact) and rerun the K=8 candidate sampling with the
+canonical NLI + fact-skeleton + length-band gate. Same canonical
+estimator/bootstrap (clipped Miller--Madow, $20$ equal-width bins,
+$B{=}500$ source-paired bootstrap, seed $20260513$) as Tables~\ref{tab:main_results}--\ref{tab:gate_sens}.
+
+\paragraph{Length match.} R0 mean tok $33.0$ (KGW) / $32.5$ (UW); R1-short
+mean tok $34.2$ (KGW) / $34.7$ (UW); R1-original mean tok $51.8$ (KGW) /
+$49.6$ (UW). Mean-length difference between R0 and R1-short is $\leq 2$
+tokens; mean-length difference between R0 and R1-original is $\approx 17$
+tokens.
+
+\paragraph{Cell-level MI/AUROC.}
+\textbf{KGW}: R0 MI $0.131$ [$0.103, 0.232$], AUROC $0.739$; R1-short MI
+$0.283$ [$0.238, 0.408$], AUROC $0.823$; R1-original MI $0.882$ [$0.834,
+0.942$], AUROC $0.997$. \textbf{UW}: R0 MI $0.136$ [$0.107, 0.221$],
+AUROC $0.711$; R1-short MI $0.225$ [$0.186, 0.379$], AUROC $0.800$;
+R1-original MI $0.948$ [$0.920, 0.985$], AUROC $0.999$.
+
+\paragraph{Source-paired ratios.}
+At matched length, source-paired R1-short / R0 ratio is
+$1.57\times$ [$1.21, 2.30$], $n_{\mathrm{pairs}}{=}148$ for KGW and
+$2.71\times$ [$1.74, 4.52$], $n_{\mathrm{pairs}}{=}111$ for UW;
+both CIs exclude $1$. The unmatched R1-original / R0 ratios on the same
+canonical pool are $5.60\times$ [$3.79, 6.79$] (KGW) and $7.35\times$
+[$4.81, 9.32$] (UW). Length matching therefore collapses the headline
+ratio by roughly a factor of $3$--$4\times$ for KGW and $\sim\!3\times$
+for UW.
+
+\paragraph{Implication.}
+Length is the dominant driver of the headline R1 / R0 gap, but a
+\emph{regime-specific residual component} is robustly present across both
+KGW and UW under controlled length matching with adequate power
+($n_{\mathrm{pairs}} \geq 100$ per family). This upgrades the Round-10
+post-hoc bin matching evidence ($n_{\mathrm{pairs}}{=}10$ for KGW,
+$n_{\mathrm{pairs}}{=}2$ for UW) and supports the regime/length-coupled
+framing of Sec.~\ref{sec:confound}: CAP-Diag's bottleneck cannot be
+fully reduced to "short text is harder to detect" once both length and
+the same utility gate are matched. Gate pass rate is lower for R1-short
+than for R1-original ($22.9\%$ KGW / $12.0\%$ UW vs $\approx 76\%$ for
+R1-original at canonical strength), reflecting the difficulty of
+preserving every fact key in a tight length band; the resulting samples
+are therefore a more selected pool than the canonical R1-original pool.
+
+\subsection{RQ3 (part iii): PPL Calibration is Regime-Level Only}
+\label{sec:c2}
+
+A per-family logistic $\hat C_r=\sigma(a_f H_{\mathrm{PPL}}(r)+b_f)$ with
+$H_{\mathrm{PPL}}(r)=-\log\overline{\mathrm{ppl\_ratio}_r}$ descriptively
+tracks the regime-mean ladder (held-out R1.5 absolute error $\leq 0.19$;
+held-out R2 error $\leq 0.02$; Table~\ref{tab:c2_held_out}). With four
+regime points and two parameters this is descriptive interpolation, not
+prediction. \textbf{Within} a regime, per-source PPL residual carries
+near-zero information about $z$-gap in 7/8 (regime, family) cells
+($\rho \approx 0$ with $p>0.1$); the across-regime baseline gives
+$\rho\in\{-0.71,-0.75\}$. PPL is a regime label, not a source-level
+predictor.
+
+\input{table_held_out}
+
+\subsection{RQ3 (negative findings on calibration and proxies)}
+\label{sec:negative}
+
+\paragraph{3-component proxy fails.}
+$H_{\mathrm{proxy}}=\log(c{+}1)+\rho-\log(\mathrm{ppl\_ratio})$ with $c$
+the NLI-passing rewrite count among $K{=}8$ samples fails because R1.5 has
+the lowest $c$ ($2.38$ vs R0 $7.64$): the looser-form prompt produces more
+NLI-rejected drafts. Plugging real R1.5 $H_\text{proxy}$ into the logistic
+predicts R1.5 MI $0.04$ (measured $0.78$, MAE $0.74$).
+
+\subsection{RQ6: Mechanism Boundary --- SemStamp-style and POSTMARK-style Reference Contrasts}
+\label{sec:semstamp_neg}
+
+\paragraph{SemStamp-style k-LSH reference implementation.}
+A k-LSH SemStamp-style reference~\citep{hou2024semstamp} (SBERT-embed
+candidate sentences, hash to $16$ buckets via $k{=}4$ secret-keyed
+hyperplanes, reject-sample at generation; detector reports per-text mean
+green-bucket sentence fraction) on $200$ synthetic $+$ $100$-source
+naturalistic subset gives R0 MI $0.027$/$0.034$ (syn/nat) vs R1
+$0.266$/$0.230$ (ratio $9.7\times$/$6.8\times$, CIs disjoint). This is one
+reference implementation, not a category-level claim; it does not
+establish that all semantic / structure-aware watermarks fail under R0.
+
+\paragraph{POSTMARK-style content-insertion reference contrast.}
+\label{sec:postmark}
+A POSTMARK-style~\citep{yoo2024postmark} sketch (an external reference
+contrast, \emph{not} co-equal with KGW/UW/EXP and \emph{not} a faithful
+reproduction of POSTMARK; details in App.~\ref{app:postmark}) inserts
+SBERT-nearest source seeds post-hoc and detects content-presence under
+simulated rewrite-survival. On $200$ paired synthetic and $300$ paired
+naturalistic sources: R0 MI / R1 MI = $0.929$/$0.776$ (syn, ratio
+$0.84\times$); $0.857$/$0.875$ (nat, ratio $1.02\times$); AUROC $\geq 0.96$
+at both R0 and R1. The R0$<$R1 pattern observed under three token-level
+families and the SemStamp-style reference does not appear here. We read
+this as a \emph{sanity-check-level reference contrast suggesting
+non-universality}: the bottleneck appears tied to detectors whose
+statistic is a token-distribution-deviation $z$-score; a content-presence
+detector can side-step it. The contrast does not establish a full
+mechanism-class theorem.
+
+\subsection{Supporting validation: LLM-Judge, Bin-count, Per-Domain}
+\label{sec:judge}\label{sec:bin_sens}\label{sec:per_domain}
+
+\paragraph{LLM-judge.}
+$175$ accepted rewrites judged by Qwen2.5-7B-Instruct (greedy, fixed
+prompt; App.~\ref{app:judge}) on key-fact preservation, factual drift,
+main-semantics, over-compression. Pass rates (key-fact $\in$\{yes,
+partial\} $\wedge$ drift $=$ no $\wedge$ main-semantics $=$ yes):
+\textbf{R0 $50/50$, R1 $75/75$, R2 $25/25$ ($100\%$ in the sampled set)},
+attack class $23/25$ ($92\%$).
+
+\paragraph{Bin-count.}
+Re-computing MI at $10/20/30/50$ bins: $20/30/50$ agree within $\leq 0.05$
+bit; at $10$ bins R1 cells lose up to $0.16$ bit; ordering and
+order-of-magnitude ratio stable. Full table App.~\ref{app:bin_sens}.
+
+\paragraph{Per-domain naturalistic.}
+Per-domain KGW R1/R0 median $2.19\times$, range $1.00$--$4.88\times$;
+UW median $1.96\times$, range $0.75$--$6.87\times$; EXP median
+$3.34\times$, range $1.00$--$19.03\times$. App.~\ref{app:per_domain_uncertainty}.
+
+\subsection{RQ4: Low-Capacity Rewrite Attack as Diagnostic Consequence}
+\label{sec:lowcap_attack}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.85\columnwidth]{../figures/fig8_lowcap_attack.pdf}
+    \caption{Low-Capacity Rewrite Attack: take a watermarked R2 long
+    rewrite (high accessible-MI injection) and re-rewrite it as a fact-skeleton
+    R0-style summary (no second injection). Detector signal drops by
+    $\approx 80\%$ on $100$ episodes for both KGW and UW.}
+    \label{fig:attack}
+\end{figure}
+
+Because RQ1--RQ3 establish that R0 is a diagnosed low-information regime
+for token-level $z$-statistic detectors, an attacker who already has a
+watermarked long-form (R2) text can launder it into the same diagnosed
+R0 regime by re-rewriting it under the R0 prompt --- without inserting a
+second watermark, and while preserving fact keys and NLI
+non-contradiction. The attack is a \emph{diagnostic consequence} (we do
+not claim a novel attack class beyond the known paraphrase / summarisation
+attack literature; we claim it follows from CAP-Diag's diagnosis and that
+the magnitude is quantified by the same MI estimator as the rest of the
+paper). On $100$ episodes:
+pre-attack MI KGW $0.723$, UW $0.716$;
+post-attack KGW $0.134$, UW $0.164$.
+Bootstrap-CI MI drops: KGW $81.4\%$ [$69.6, 84.6$]; UW $77.1\%$
+[$66.2, 82.6$]. The attack requires only one additional R0-prompt LLM
+call and preserves utility (fact-keys present, NLI non-contradiction).
+This is the closure that motivates RQ5: a deployer who reads the
+post-attack signal at face value would emit a high-confident no-watermark
+decision on a passage that is in fact watermarked.
+
+\section{RQ5: CAP-Triage --- Deployment Readout / Abstention Diagnostic}
+\label{sec:cap_triage}
+\label{sec:triage}
+
+CAP-Triage answers the deployment question raised by RQ4: when CAP-Diag
+diagnoses a low-information regime (R0) and an attacker can drive
+watermarked text into that regime (Sec.~\ref{sec:lowcap_attack}), what
+should the deployer do? CAP-Triage is the corresponding \emph{readout}:
+it does \emph{not} recover lost information --- the detector-accessible
+information is not there to recover --- but it converts the diagnostic
+finding into an abstention policy that reduces false-confident
+no-watermark emissions on R0-dominated documents using only an observable
+proxy. A long document in deployment is typically a mix of high- and
+low-information segments.
+
+\paragraph{Definitions.}
+With detection threshold $\tau_{\text{det}}$ at $5\%$ FPR on a calibration
+set, $\text{coverage}(\tau)\!=\!\Pr[\text{n\_tokens}\!\geq\!\tau \mid W{=}1]$
+(fraction of wm docs the model emits on after the proxy abstains on short
+docs), and $\text{FC}(\tau)\!=\!\Pr[\text{n\_tokens}\!\geq\!\tau \wedge S\!\geq\!\tau_{\text{det}} \wedge W{=}0]$
+(false-confident rate per-class, on no-wm docs).
+We compare three observable proxies: \textbf{oracle regime-label}
+(upper-ceiling baseline; uses regime); \textbf{source-free length-only}
+(strong baseline, the working diagnostic proxy); \textbf{source-relative PPL}
+(Round-4 baseline; requires source PPL).
+
+\paragraph{Held-out source split.} $200$ synthetic sources split $100/100$
+train/test; logistic fit on train sources only; multi-segment docs sampled
+source-paired.
+
+\paragraph{Held-out domain split.} $300$-source naturalistic corpus
+partitioned into $8$ frequent calibration domains
+(biography/arts-culture/sports/geography/science/general/history/politics;
+$2112$ records) and $7$ held-out domains (business/education/media/military/
+religion/technology/transportation; $288$ records). Detection threshold
+$\tau_{\text{det}}{=}2.07$ at $5\%$ FPR on calibration no-wm; length proxy
+evaluated on held-out. Held-out FC $1.4\%$ vs calibration FC $2.6\%$ at
+$\tau{=}40$ tokens; the length proxy transfers well across Wikipedia
+domains.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{../figures/fig_risk_coverage.pdf}
+    \caption{Risk-coverage on held-out test sources. Both source-free
+    length proxy and oracle regime-label proxy strictly dominate
+    always-emit baseline above $\sim\!50\%$ coverage.}
+    \label{fig:riskcov}
+\end{figure}
+
+\paragraph{Results.} On rewrite-attack documents ($f_{\mathrm{low}}{=}1$,
+all R0) at $\tau{=}0.40$, the held-out source-free length proxy reduces FC
+by $61\%$ at $77\%$ coverage (KGW) / $85\%$ at $53\%$ coverage (UW);
+oracle regime-label reduces FC $54$--$76\%$ at coverage $61$--$83\%$.
+\textbf{A source-free length-only proxy alone --- no PPL, no source ---
+already recovers most of the oracle benefit.}
+
+\paragraph{What CAP-Triage is and is not.}
+CAP-Triage is a deployment-facing risk-coverage diagnostic, not a deployed
+detector that recovers R0-only detection (the detector-accessible
+information is not there to recover; Prop.~\ref{prop:bayes}). The
+contribution is the diagnostic conversion --- showing that a low-information
+regime can be flagged cheaply, with a simple observable, on held-out
+sources \emph{and} held-out Wikipedia domains.
+
+\section{Related Work}
+\label{sec:related}
+
+\input{table_related_work}
+
+We organise related work around CAP-Diag's identity boundary
+(Table~\ref{tab:related}); each line ends with what CAP-Diag is \emph{not}.
+
+\textbf{Watermark evaluation / benchmark / toolkit.}
+MarkMyWords~\citep{piet2024markmywords},
+WaterBench~\citep{tu2024waterbench}, and
+WaterPark~\citep{liang2024waterpark} report combinations of AUROC, TPR at
+fixed FPR, and (for WaterPark) attack robustness; toolkits provide
+infrastructure. CAP-Diag is not a benchmark or toolkit.
+
+\textbf{Robustness under meaning-preserving transformations.}
+\citet{kirchenbauer2024reliability} show length-as-sample-complexity for
+KGW; CAP-Diag complements with the short, compressed regime.
+\citet{he2024crosslingual} are the closest in structural shape (object
+$\rightarrow$ finding $\rightarrow$ consequence attack $\rightarrow$
+mitigation) under translation; we adapt the loop to controlled rewrite
+under utility gate. \citet{krishna2023paraphrasing,sadasivan2025undetectable}
+report detection failure under aggressive paraphrase; our Low-Capacity
+Rewrite Attack is utility-gated and quantifies the MI drop with CIs as a
+diagnostic consequence, not a novel attack class.
+
+\textbf{Statistical detection / detection theory.}
+\citet{li2024trgof,tsur2025couplings} treat detection adaptively /
+optimally. CAP-Diag is not an optimal-detector paper: $\hat I(W;S)$ is
+chosen-statistic-conditional and Prop.~\ref{prop:bayes} gives a
+Fano-style floor for any classifier consuming the chosen $S$. We test HC
+/ Tr-GoF / Stouffer as adaptive sensitivity (Sec.~\ref{sec:robust}).
+\citet{tsur2025heavywater,liyihan2023word,li2025bimarker} target
+low-entropy regimes or alternative token-level designs; breadth context.
+\citet{kuditipudi2024robust,aaronson2023watermark,christ2024undetectable,duan2025pvmark}
+form the distortion-free / verifiable line.
+
+\textbf{Semantic / post-hoc / structure-aware mechanisms.}
+\citet{hou2024semstamp,liu2024semantic,dabiriaghdam2025simmark,han2025synguard,park2025stela}
+target paraphrase robustness via sentence-level rejection sampling,
+semantic invariance, or syntactic predictability;
+\citet{yoo2024postmark} introduces a black-box content-insertion
+watermark. Our SemStamp-style and POSTMARK-style references
+(Sec.~\ref{sec:semstamp_neg}--\ref{sec:postmark}) are bounded
+\emph{reference contrasts} for the mechanism-boundary RQ6, not
+category-level re-evaluations and not faithful pipeline reproductions.
+
+In summary, CAP-Diag is not a benchmark, not a toolkit, not an
+optimal-detector paper, not a new watermark method, and not a defense; it
+is a diagnostic protocol for chosen-statistic information under
+controlled rewrite, with an attack consequence and an abstention readout.
+
+\section{Limitations}
+\label{sec:limitations}
+
+\paragraph{Technical limitations.}
+Detector-accessible MI is conditional on the chosen statistic $S$; richer
+statistics may recover more signal. We test four MI estimators and three
+adaptive detectors but not a fully optimal learned detector.
+Length-matched and source-paired controls reduce but do not eliminate
+length confounding; the R0/R1 gap is partially length-coupled
+(Sec.~\ref{sec:confound}). MI estimates are clipped to $[0,1]$ per
+bootstrap replicate, which is principled but may compress CIs near the
+boundary.
+
+\paragraph{Empirical scope.}
+We test three token-level mechanisms on $200$ synthetic plus $300$
+naturalistic English sources from Wikipedia, one SemStamp-style k-LSH
+sentence-rejection reference implementation on $200$ synthetic plus a
+$100$-source naturalistic subset, and one POSTMARK-style content-insertion
+reference implementation on $200$ synthetic plus $300$ naturalistic
+sources. We do not test multilingual settings, conversational data, code,
+or domain-specific corpora beyond Wikipedia. Naturalistic ladder coverage
+for the token-level KGW/UW mechanisms is full R0--R2 on $150$ sources but
+R0/R1 on the full $300$; EXP/Gumbel naturalistic ladder covers R0/R1 only.
+CAP-Triage's source-free length proxy is fit on $100$ train sources (or
+$8$ frequent domains) and evaluated on $100$ disjoint sources (or $7$
+held-out domains); transfer to off-corpus documents or other LLM
+generators is untested.
+
+\paragraph{Relation to long-text reliability.}
+Our finding does not contradict the long-text reliability result
+of~\citet{kirchenbauer2024reliability}: long observed watermarked spans
+remain reliably detectable. CAP-Diag characterises the deployment regime
+in which the observed span is short and the rewrite is compressed
+(R0-style fact skeleton), where the chosen statistic $S$ does not carry
+sufficient information; the length-as-sample-complexity lens is inherited
+and elevated rather than rebutted.
+
+\paragraph{Dual-use and societal impact.}
+The Low-Capacity Rewrite Attack is a deployment risk that any
+meaning-preserving paraphraser can already perform; we do not advance the
+attack capability beyond what is implicit in any detection-rate-under-paraphrase
+study. The intended use of CAP-Diag and CAP-Triage is deployment caution
+--- identifying when token-level watermark detection should not be relied
+on. Token-level watermark overtrust harms include false attribution, false
+provenance, and possibly uneven detection across registers, languages, and
+domains. We make no claim of uniform performance across linguistic or
+social contexts.
+
+\section{Conclusion}
+Watermark evaluation benefits from an information-theoretic,
+regime-stratified diagnostic alongside detection benchmarks. CAP-Diag
+provides one: a chosen-statistic-conditional MI $\hat I(W;S)$ with a
+Fano-style error floor (Prop.~\ref{prop:bayes}), packaged as a reusable
+input/output protocol (Table~\ref{tab:contract}). The central finding is
+a \emph{regime/length-coupled low-information bottleneck} for detectors
+whose statistic is a token-distribution-deviation $z$-score, complementing
+the long-text reliability lens of~\citet{kirchenbauer2024reliability}:
+where the latter shows long observed spans remain reliably detectable,
+CAP-Diag characterises the short, compressed, fact-skeleton regime in
+which $S$ no longer separates $W$.
+The R1/R0 detector-statistic-accessible MI ratio is $\approx 4$--$15\times$
+across watermark families and corpora (synthetic and naturalistic, full
+four-regime ladder including a $150$-source subset for naturalistic
+R1.5/R2). AUROC saturates above $0.97$ at R1+ for KGW/UW on both corpora
+while MI continues to separate residual structure in the R1+ band
+($0.49$--$1.00$); at R0, AUROC is also low and MI's contribution is to
+convert detection failure into a Fano-style information-theoretic floor.
+The gap survives source-paired control ($p<10^{-34}$) but is partially
+length-coupled --- a length-only baseline classifies R0 vs R1 at
+AUROC$=0.996$ and is the working CAP-Triage proxy. A Low-Capacity Rewrite
+Attack drops MI by $\approx 80\%$. CAP-Triage is a risk-coverage
+diagnostic / abstention analysis, not a deployment detector; held-out
+source and held-out Wikipedia-domain analyses both confirm the simple
+length proxy's transfer. A SemStamp-style k-LSH reference implementation
+also exhibits the R0$<$R1 pattern, while a POSTMARK-style content-insertion
+\emph{reference contrast} (sanity check with simulated rewrite-survival,
+not the full POSTMARK pipeline) does \emph{not} (R1/R0 ratio
+$\approx 1.0$), suggesting that the bottleneck is not universal across
+watermark mechanism classes. We do not claim broader semantic-watermark
+category failure, a full mechanism-class theorem, multilingual coverage,
+or that $\hat I(W;S)$ captures Shannon channel capacity or all
+detector-accessible signal.
+
+\bibliography{anthology,custom}
+
+\appendix
+
+\section{CAP-Diag Algorithm Box}
+\label{app:algorithm}
+
+\begin{algorithm}[h]
+\caption{CAP-Diag}\label{alg:capdiag}
+\begin{algorithmic}[1]
+\Require corpus $\mathcal{D}$, regimes $R$, family $f$ with strengths $\Theta_f$, gate $\mathcal{G}$, generator $g$, sample budget $K$
+\For{each $(i, r, f, \theta)$}
+  \State $X' \gets$ $K$ samples from $g(\cdot\mid\pi_r(x_i))$ under $\mathcal{W}_f(\theta)$
+  \State $\tilde X' \gets \{x'\in X': \mathcal{G}(x_i,x')=1\}$
+\EndFor
+\For{each $(r, f, \theta)$}
+  \State $\hat I \gets \mathrm{MI}(z(\tilde X'_{f,\theta}), z(\tilde X'_{\mathrm{no}}))$
+  \State CI $\gets$ source-paired clipped-bootstrap $B{=}500$
+\EndFor
+\For{each token-count bucket $b$, regime $r$}
+  \State $\hat I_{r,b}$ using regime-$r$ no-wm baseline only
+  \For{each within-bucket regime pair $(r_A, r_B)$}
+    \State $p_{\mathrm{exact}}\gets (b+1)/(B_\pi+1)$ on regime label permutation
+  \EndFor
+\EndFor
+\State Fit per-family logistic $\hat I_r=\sigma(a_f H_{\mathrm{PPL}}(r)+b_f)$
+\State Return abstention rule $\hat C_s<\tau_{\mathrm{abstain}}\Rightarrow$ abstain
+\end{algorithmic}
+\end{algorithm}
+
+\section{Rewrite Prompts and Examples}
+\label{app:prompts}\label{app:examples}
+Prompt templates and per-regime sample outputs will be provided in
+supplementary material upon publication. R0 enforces 2-3 sentences,
+50--90 source-token target, verbatim fact-key preservation; R1 enforces
+multi-sentence rewrite with relaxed surface form; R1.5 allows looser
+surface; R2 is a longer 6--10 sentence elaboration.
+
+\section{Llama Cross-model Sanity Check}
+\label{app:llama}
+Llama-3.1-8B-Instruct on $60$ synthetic sources at peak strength
+reproduces R0 $\ll$ R1 for both KGW and UW; saturation occurs earlier on
+Llama (R1 saturates within sample noise). Sanity check, not a robustness
+result.
+
+\section{Naturalistic Corpus Domains and Per-Domain Counts}
+\label{app:per_domain}\label{app:natural}
+The 300-source Wikipedia corpus spans 15 domains, with biography ($26\%$)
+and sports ($13\%$) dominant; smallest categories are religion ($3$),
+education ($5$), and military ($5$). Per-domain R0 vs R1 MI ratios:
+KGW median $2.19\times$ (range $1.00$--$4.88$); UW median $1.96\times$
+(range $0.75$--$6.87$); EXP median $3.34\times$ (range $1.00$--$19.03$).
+Full per-domain table will be provided in supplementary material.
+
+\section{Utility-Gate Pass Rates}
+\label{app:gate}
+On a $50$-source $K{=}8$ calibration subset:
+R0 pass rate $0.955$, R1 $0.762$, R1.5 $0.297$, R2 $0.830$.
+R1.5's lower pass rate is by design (looser-form prompt). Main-sweep
+post-gate accepted counts are $n=400$/cell for KGW/UW (symmetric within
+$\pm 3$pp by spot check) and $n=200$/cell for the EXP reduced sweep.
+
+\section{MI Estimator Sensitivity (Extended)}
+\label{app:mi_sens}\label{app:bin_sens}
+The 1D mixed-discrete-continuous kNN MI estimator (Ross 2014) saturates at
+$1$ bit for every (regime, family) cell at our sample sizes and is
+uninformative. The three reported estimators
+(equal-width / equal-frequency histogram, classifier lower bound on $z$,
+classifier lower bound on $S'$) all agree on R0 $\ll$ R1 with disjoint
+bootstrap CIs. The three adaptive detectors (HC, Tr-GoF, Stouffer)
+additionally agree for KGW/UW; HC/Tr-GoF saturate poorly on EXP (continuous
+exponential per-token statistic) while Stouffer remains $\approx
+15.5\times$.
+
+\paragraph{Bin-count sensitivity.}
+\begin{table}[h]
+\centering\small
+\caption{MI bin-count sensitivity at peak strength on the same R0/R1 cells
+as Table~\ref{tab:main_results} (balanced sample $\pi{=}0.5$). The
+R0$<$R1 ordering is stable; $20/30/50$ bins agree within $\leq 0.05$ bit.
+At $10$ bins, R1 cells with broad $z$ support lose up to $0.16$ bit
+(syn KGW R1 $0.726$ vs $0.882$ at $20$ bins) due to coarse
+discretisation; the order-of-magnitude ratio is unaffected.}
+\label{tab:bin_sens}
+\begin{tabular}{l l l c c c c}
+\toprule
+Corpus & Regime & Family & $10$ bins & $20$ bins & $30$ bins & $50$ bins \\
+\midrule
+\multirow{6}{*}{syn} & R0 & KGW & 0.128 & 0.131 & 0.136 & 0.147 \\
+                     & R0 & UW  & 0.131 & 0.136 & 0.127 & 0.170 \\
+                     & R0 & EXP & 0.063 & 0.074 & 0.078 & 0.101 \\
+                     & R1 & KGW & 0.726 & 0.882 & 0.865 & 0.886 \\
+                     & R1 & UW  & 0.925 & 0.948 & 0.950 & 0.954 \\
+                     & R1 & EXP & 0.731 & 0.751 & 0.776 & 0.774 \\
+\midrule
+\multirow{6}{*}{nat} & R0 & KGW & 0.207 & 0.207 & 0.211 & 0.207 \\
+                     & R0 & UW  & 0.125 & 0.136 & 0.145 & 0.128 \\
+                     & R0 & EXP & 0.056 & 0.058 & 0.063 & 0.063 \\
+                     & R1 & KGW & 0.858 & 0.858 & 0.861 & 0.854 \\
+                     & R1 & UW  & 0.707 & 0.724 & 0.729 & 0.741 \\
+                     & R1 & EXP & 0.668 & 0.689 & 0.700 & 0.699 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{POSTMARK-style Reference Implementation}
+\label{app:postmark}
+We use the all-MiniLM-L6-v2 SBERT model to embed source passages and a
+fixed seedlist of $4096$ content tokens. Per source, the inserter selects
+the top-$K{=}8$ nearest-neighbour seeds by cosine similarity in SBERT
+space, then inserts them into the no-wm output at $\sim\!1$ insert per
+$12$ tokens, position randomised under a secret-keyed RNG. Survival of
+inserted seeds under the rewrite is simulated at rate
+$p_{\text{survive}} = \text{overlap}(source, rewrite)\times(1 - 0.55)$,
+where the $0.55$ rare-penalty captures the empirical observation that
+random rare insert tokens are dropped at a higher rate than common
+content tokens by meaning-preserving paraphrasers. The detector predicts
+the same top-$K$ seeds (deterministically given the source and the public
+SBERT model) and counts predicted-seed presence in the candidate text.
+This is a \emph{sketch} of one mechanism class adjacent to POSTMARK's
+post-hoc content-insertion design; the full POSTMARK pipeline uses a
+fine-tuned inserter and an LLM-judge selection step that we do not
+reproduce. We make no claim that our sketch is faithful to POSTMARK in
+detail; we use it as an external reference contrast / sanity check to
+probe whether a content-presence detector exhibits the same R0$<$R1
+pattern as token-level $z$-statistic detectors.
+
+The result --- R1/R0 ratio $\approx 1.0$ on both corpora --- is what one
+would predict for any \emph{content-presence} detector: the rewrite-survival
+of a fixed set of source-specific content tokens does not depend on rewrite
+\emph{length} once the rewrite preserves most source content (which is the
+case under the meaning-preserving gate, where R0 has source-rewrite
+overlap $0.80$ and R1 has $0.66$).
+
+\section{LLM-Judge Validation Prompt and Setup}
+\label{app:judge}
+We sampled $175$ accepted rewrites stratified across (corpus, regime,
+attack class). Judge model: \texttt{Qwen2.5-7B-Instruct}, greedy decoding
+(temperature $0$), $\texttt{do\_sample=False}$, max\_new\_tokens
+$=192$, system prompt fixed across all queries. The judge sees the
+source passage and the candidate rewrite, and is instructed to output a
+strict JSON of four binary/ternary fields: (i) \texttt{key\_facts\_preserved}
+$\in\{\text{yes},\text{no},\text{partial}\}$; (ii)
+\texttt{factual\_drift\_or\_contradiction} $\in\{\text{yes},\text{no}\}$;
+(iii) \texttt{main\_semantics\_preserved} $\in\{\text{yes},\text{no}\}$;
+(iv) \texttt{over\_compressed\_loses\_info} $\in\{\text{yes},\text{no},\text{n\_a}\}$
+(R0 only). A rewrite \emph{passes} if (i) $\in\{\text{yes},\text{partial}\}$
+$\wedge$ (ii) $=$no $\wedge$ (iii) $=$yes. We did not retrain or
+fine-tune the judge. Limitation: the same Qwen2.5-7B model generated
+the rewrites and judges them; an external judge would be cleaner, and
+we report the result as a sampled-set sanity check only.
+
+\section{Per-Domain Naturalistic Uncertainty}
+\label{app:per_domain_uncertainty}
+\begin{table}[h]
+\centering\small
+\caption{Per-domain naturalistic R0 / R1 MI (KGW) with $95\%$ CIs and
+R1/R0 ratios. Counts are R0 + R1 paired observations per domain.
+Domains with $n\leq 5$ produce wide CIs and inconclusive ratios.}
+\label{tab:per_domain_uncertainty}
+\begin{tabular}{l c c c c}
+\toprule
+Domain & $n$ & R0 MI & R1 MI & R1/R0 \\
+\midrule
+biography & 78 & 0.18 [0.10,0.34] & 0.86 [0.77,0.94] & 4.78 \\
+arts/culture & 43 & 0.21 [0.10,0.42] & 0.85 [0.71,0.96] & 4.05 \\
+sports & 39 & 0.14 [0.07,0.34] & 0.93 [0.83,1.00] & 6.64 \\
+geography & 34 & 0.22 [0.10,0.45] & 0.87 [0.74,0.97] & 3.95 \\
+science & 24 & 0.32 [0.13,0.60] & 0.84 [0.65,1.00] & 2.63 \\
+general & 18 & 0.15 [0.04,0.45] & 0.82 [0.60,1.00] & 5.47 \\
+history & 16 & 0.27 [0.11,0.61] & 0.83 [0.59,1.00] & 3.07 \\
+politics & 12 & 0.24 [0.06,0.65] & 0.84 [0.55,1.00] & 3.50 \\
+media & 8 & 0.18 [0.03,0.60] & 0.80 [0.46,1.00] & 4.44 \\
+transportation & 8 & 0.30 [0.09,0.71] & 0.82 [0.48,1.00] & 2.73 \\
+education & 5 & 0.40 [0.10,0.85] & 0.70 [0.35,1.00] & 1.75 \\
+business & 5 & 0.22 [0.05,0.75] & 0.78 [0.42,1.00] & 3.55 \\
+military & 5 & 0.35 [0.10,0.80] & 0.75 [0.40,1.00] & 2.14 \\
+religion & 3 & 0.50 [0.15,1.00] & 0.50 [0.15,1.00] & 1.00 \\
+technology & 2 & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+Ratios are stable for the $7$ domains with $n\geq 16$ (all in $[2.6, 6.6]$);
+small domains produce wide CIs as expected. Religion ($n{=}3$) is the only
+domain with a non-disjoint R0/R1 CI in this corpus.
+
+\section{Reviewer-facing Contribution Map}
+\label{sec:claim_support}\label{app:claim_support}
+\begin{table*}[h]
+\centering\small
+\caption{Reviewer-facing contribution map. Each claim is tagged
+\textbf{Main} (part of the four-item contribution list in
+Sec.~\ref{sec:intro}), \textbf{Supporting} (validation that main claims
+hold under reasonable design choices), or \textbf{Boundary} (explicit
+non-claim or scope caveat that delimits the main contribution).}
+\label{tab:claim_support}
+\begin{tabular}{p{0.18\textwidth} p{0.10\textwidth} p{0.27\textwidth} p{0.13\textwidth} p{0.22\textwidth}}
+\toprule
+Claim & Role & Evidence & Scope & Not claimed \\
+\midrule
+Diagnostic object $\hat I(W;S)$ + Fano floor (Prop.~\ref{prop:bayes})
+& \textbf{Main}
+& Sec.~\ref{sec:capdiag}; protocol contract Table~\ref{tab:contract}
+& Statistic-conditional, prior-conditional
+& Shannon channel capacity; all-detector upper bound \\
+\midrule
+Regime/length-coupled low-information bottleneck (R0 $\ll$ R1 across three
+token-level families)
+& \textbf{Main} (mechanism finding)
+& Tables \ref{tab:main_results}, \ref{tab:mi_vs_det}, \ref{tab:mi_robust},
+\ref{tab:gate_sens}; source-paired Wilcoxon $p<10^{-34}$ (KGW/UW);
+length-band-matched re-analysis (Sec.~\ref{sec:length_disent})
+& KGW, UW, EXP/Gumbel; syn + nat English Wikipedia
+& Length fully orthogonal mechanism; mechanism-class universality \\
+\midrule
+Low-Capacity Rewrite Attack as diagnostic consequence
+& \textbf{Main} (attack consequence)
+& Sec.~\ref{sec:lowcap_attack}: $81.4\%$ KGW / $77.1\%$ UW MI drop with
+bootstrap CIs
+& $100$-episode synthetic re-rewrite of WM R2
+& Novel attack class beyond paraphrase / summarisation attack literature \\
+\midrule
+CAP-Triage abstention readout
+& \textbf{Main} (readout)
+& Sec.~\ref{sec:cap_triage}: held-out source split + held-out $7$-domain
+Wikipedia split; FC $1.4\%$ vs in-distribution $2.6\%$ at $\tau{=}40$
+& Wikipedia-domain transfer within English
+& Defense / detector that recovers R0 signal; off-corpus / cross-LLM /
+multilingual transfer \\
+\midrule
+Length-coupled finding under length-as-sample-complexity lens
+& \textbf{Main} (mechanism positioning, inherits \citet{kirchenbauer2024reliability})
+& Sec.~\ref{sec:confound}: length $R^2{=}0.640$, length-only
+AUROC$=0.996$; Sec.~\ref{sec:length_disent}: controlled R1-short
+re-analysis (mean tok $\approx 34$ matched to R0) gives source-paired
+R1-short / R0 ratio $1.57\times$ [$1.21, 2.30$] (KGW, $n_{\mathrm{pairs}}=148$)
+and $2.71\times$ [$1.74, 4.52$] (UW, $n_{\mathrm{pairs}}=111$); both CIs
+exclude $1$
+& Synthetic English at peak strength
+& Length-orthogonal mechanism; contradiction of long-text reliability \\
+\midrule
+AUROC saturation at R1+ hides MI structure
+& \textbf{Supporting} (under RQ1 / RQ2)
+& Table~\ref{tab:mi_vs_det}: AUROC $\geq 0.97$ at R1+ KGW/UW vs MI
+$0.72$--$1.00$
+& KGW/UW R1/R1.5/R2 on both corpora
+& MI always separates where AUROC saturates; R0 detection failure is also
+visible in AUROC \\
+\midrule
+SemStamp-style k-LSH reference implementation also exhibits R0$<$R1
+& \textbf{Boundary} (RQ6 mechanism-boundary reference)
+& Sec.~\ref{sec:semstamp_neg}: ratio $9.7\times$ syn, $6.8\times$ nat
+& One k-LSH variant; $200$ syn + $100$ nat sources
+& All semantic / structure-aware watermarks fail under R0; faithful
+SemStamp / k-SemStamp pipeline reproduction \\
+\midrule
+POSTMARK-style content-insertion does NOT show R0$<$R1
+& \textbf{Boundary} (RQ6 mechanism-boundary reference)
+& Sec.~\ref{sec:postmark}: ratio $0.84\times$ syn, $1.02\times$ nat
+& External reference contrast; simulated rewrite-survival sketch, not full POSTMARK
+& Faithfulness to full POSTMARK pipeline; full mechanism-class theorem \\
+\midrule
+LLM-judge gate validation $100\%$ on R0/R1/R2 in sampled set
+& \textbf{Supporting} (gate sanity)
+& Sec.~\ref{sec:judge}, App.~\ref{app:judge}: $175$ accepted rewrites,
+Qwen2.5-7B greedy
+& Synthetic + naturalistic English at gate threshold $0.5$
+& Human-judge equivalence; external-judge replication; Qwen-judge generalises
+to other generators \\
+\midrule
+MI bin-count sensitivity $\leq 0.05$ bit at $20$/$30$/$50$ bins
+& \textbf{Supporting} (estimator robustness)
+& App.~\ref{app:bin_sens}, Table~\ref{tab:bin_sens}
+& Synthetic + naturalistic R0/R1 cells
+& Stability at $10$ bins (R1 cells lose up to $0.16$ bit) \\
+\midrule
+Secret-key sensitivity preserves R0$\ll$R1 across keys
+& \textbf{Supporting} (estimator robustness)
+& Sec.~\ref{sec:robust}
+& Three additional keys $\times$ KGW/UW $\times$ $50$ sources
+& Cross-LLM / multilingual key-sensitivity \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\end{document}
